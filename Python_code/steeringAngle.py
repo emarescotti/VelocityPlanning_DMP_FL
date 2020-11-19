@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 import numpy as np
 import math
 import matplotlib.pyplot as plt
@@ -38,9 +40,8 @@ def steeringAngle(path,body_length):
 
 """
 # EXAMPLE CODE: analyze a circumference
-    
 R = 5 # circumference radius
-
+body_length = 5
 x = []
 y = []
 
@@ -48,13 +49,10 @@ for i in  range(500):
     th = 2*np.pi/500 * i
     x = np.append(x, R * np.cos(th))
     y = np.append(y, R * np.sin(th))
-
-body_length = 5
-
+    
 angle,steering = steeringAngle(np.array([x,y]),body_length)
 
 # PLOT THE RESULTS
-
 plt.figure(1)
 plt.plot(angle)
 plt.grid()
