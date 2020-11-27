@@ -260,41 +260,42 @@ v_des = np.append(points,np.append(v_des,points)) # velocity vector function of 
 # new curvilinea abscissa (with velocity reference embedded)
 absc_des = np.cumsum(v_des) * dt
 
-# define the x and y desired points to be fed into the DMP
+# definition of the x and y desired points to be fed into the DMP
 x1_des = np.interp(absc_des,absc_teach,y_teach[:,0])
 x2_des = np.interp(absc_des,absc_teach,y_teach[:,1])
 
 y_des = np.column_stack((x1_des,x2_des))
 
-# #########################
-# PATH APPROX THROUGH DMP #
-###########################
+# ################################### #
+# 5. PATH APPROXIMATION THROUGH DMP   #
+# ################################### #
 
-# add the time relative to the fake points (beginning and end)
+# add the fake points time (beginning and end)
 runtime = t_tot + 2*t_start
 
-# total time instants of the simulation (without perturbation, it should complete 
-# the path in a shorter time)
+# total time instants of the simulation (without perturbations, 
+# it should complete the path in a shorter time)
 timesteps=int(round((runtime+t_extra)/dt))
 
-# Selection of the DMP METHOD
+# Selection of the DMP METHOD (0 is the uncoupled version, 1 is the coupled one)
+# IF no perturbations are modelled, uncoupled and coupled work with the same results
 dmp_method = 0
     
 if dmp_method == 0:
     # Standard WORKS
     print("\n DMP method: standard \n")
-    dmp_std = dmp_standard.DMPs(n_dmps=2,n_bfs=nbfs,dt=dt,run_time=runtime)
-    dmp_std.imitate_path(np.transpose(y_des), plot=False)
-    y_track, dy_track, ddy_track = dmp_std.rollout(timesteps=timesteps)
+    dmp_std = dmp_standard.DMPs(n_dmps=2,n_bfs=nbfs,dt=dt,run_time=runtime) # initialization
+    dmp_std.imitate_path(np.transpose(y_des), plot=False)                   # trajectory learning
+    y_track, dy_track, ddy_track = dmp_std.rollout(timesteps=timesteps)     # offline trajectory reproduction
 elif dmp_method == 1:
     print("\n DMP method: coupled 3\n")
     dmp_coupled3 = dmp_coupled3.DMPs(n_dmps=2,n_bfs=nbfs,dt=dt,run_time=runtime)
     dmp_coupled3.imitate_path(np.transpose(y_des), plot=False)
-    y_c, dy_c, ddy_c, y_track, dy_track, ddy_track, error, tau_save = dmp_coupled3.rollout(timesteps=timesteps)
+    y_c, dy_c, ddy_c, y_track, dy_track, ddy_track, error, tau_save = dmp_coupled3.rollout(timesteps=timesteps) # online numerical trajectory reproduction
 
-# ############################
-# GENERATION OF THE TXT FILE #
-# ############################
+# #################################### #
+# 6. GENERATION OF THE ROBOT INPUT [m] #
+# #################################### #
 
 # time vector (DMP time step)
 time_DMP = np.linspace(0,runtime+t_extra,len(y_track[:,0]))
@@ -305,7 +306,7 @@ f_y = interpolate.interp1d(time_DMP,y_track[:,1],kind="linear")
 x = (-f_x(np.arange(0,runtime,dt_panda)) + x_off) / 1000 # [m]
 y = (-f_y(np.arange(0,runtime,dt_panda)) + y_off) / 1000 # [m]
 
-# definition of the vertical coordinate
+# definition of the vertical coordinate (imposed constant)
 z = (np.zeros(len(x)) + z_off) / 1000 # [m]
 
 x = np.append(x,x[-1] * np.ones(3000))
@@ -331,9 +332,9 @@ qy = np.append(qy,qyi)
 qz = np.append(qz,qzi)
 qw = np.append(qw,qwi)
 
-# ###############
-# SILICONE FLOW #
-# ###############
+# ################# #
+# 7. SILICONE FLOW  #
+# ################# #
 
 v_x_fin = np.diff(x) / dt_panda
 v_y_fin = np.diff(y) / dt_panda
@@ -342,15 +343,16 @@ v_y_fin = np.append(v_y_fin,v_y_fin[-1])
 
 v_final = np.sqrt(v_x_fin**2 + v_y_fin**2)
 
-duty_ref = np.array([0.02, 0.08, 0.22, 0.80, 0.9, 1.0]) # [%] - EXPERIMENTAL
+# EXPERIMENTAL DUTY CYCLE - VELOCITY RELATIONSHIP
+duty_ref = np.array([0.02, 0.08, 0.22, 0.80, 0.9, 1.0]) # [%] 
 ee_v_ref = np.array([0.0, 20.0, 35.0, 50.0, 65.0, 80.0]) / 1000 # [mm]
 
-f_duty = interpolate.interp1d(ee_v_ref,duty_ref,kind="slinear") # THAT'S A FUNCTION
+f_duty = interpolate.interp1d(ee_v_ref,duty_ref,kind="slinear")
 duty = f_duty(v_final)
 
-# ##########
-# ROS NODE #
-# ##########
+# ############# #
+# 8. ROS NODE   #
+# ############# #
 
 import rospy
 import serial
