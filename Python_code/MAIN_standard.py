@@ -29,70 +29,76 @@ def euler_to_quaternion(yaw, pitch, roll): # Z Y X
 
 plt.close("all")
 
-# ###################
-# PARAMETERS TO SET #
-# ###################
+# ##################################################################### #
+#                            ALGORITHM STARTS                           #
+# ##################################################################### #
 
-nozzle_dia = 8.0 # [mm] - diameter of the silicon nozzle
+# ###################### #
+# 1. PARAMETERS SETTING  #
+# ###################### #
 
-body = 5.0      # [ODD NUM] - length of the "car"
-clip = 0.49     # clipping of the steering parameter (avoid too hard directional changes)
-width_win = 7   # [ODD NUM] - width of the moving window mean
+nozzle_dia = 8.0 # [mm]         - diameter of the caulking gun nozzle
 
-t_start = 0.2    # [s]       - time for let DMP start and end
-t_extra = 10.0   # [s]       - extra simulation time
+body = 5.0       # [ODD NUM]    - length of the "car" to compute the steering
+clip = 0.49      #              - clipping of the steering parameter (to avoid too hard directional changes)
+width_win = 7    # [ODD NUM]    - width of the moving window mean (to smooth the steering)
 
-nbfs = 2000      #           - number of basis function for DMP
+t_start = 0.2    # [s]          - time for let DMP start and end (to avoid a starting/ending non-null velocity)
+t_extra = 10.0   # [s]          - extra simulation time ( Set 0.0 if not necessary)
 
-acc_lim = 30.0  # [mm/s^2]  - limit acceleration of the robot
+nbfs = 2000      #              - number of DMP basis functions (the longer the path, the higher the number)
 
-dt = 1e-2        # [s] - time step for the DMP
-dt_panda = 1e-3  # [s] - time step of the robot controller
+acc_lim = 30.0   # [mm/s^2]     - limit acceleration of the robot
 
-# definition of the offset values (txt file generation)
+dt = 1e-2        # [s]          - time step for the DMP execution
+dt_panda = 1e-3  # [s]          - time step of the robot controller
+
+# definition of the offset position (Each reference path starts at (0,0,0) coordinates, which have to 
+# be translated according to the effective starting position in the workspace)
+# SET THESE ACCORDING TO THE ACTUAL WORKSPACE
 x_off =  410.11 # 400.0 # [mm]
 y_off = -479.90 # 50.0  # [mm]
-z_off =  419.0 # 300.0 # [mm]
+z_off =  419.0 # 300.0  # [mm]
 
-# gun inclination
+# gun inclination: here it is selected a vertical orientation
 inclination = 0 * np.pi / 180 # [rad] - inclination angle of the gun
 
-# desired trajectory (from file) - RUN BEFORE THE OTHER CODE TO GENERATE THE FILE
-y_teach = np.transpose(np.load("/home/franka/elia_ws/src/bpkg/scripts/test1.npz",'r+b')['arr_0']) # mm
+# desired trajectory (from .npz file, set the directory if needed) - RUN BEFORE THE PATH GENERATOR CODE
+y_teach = np.transpose(np.load("/test1.npz",'r+b')['arr_0']) # mm
 
-# ####################################################
-# INITIAL REFITTING + ANGLE AND STEERING COMPUTATION #
-# ####################################################
+# ###################################################### #
+# 2. INITIAL REFITTING + ANGLE AND STEERING COMPUTATION  #
+# ###################################################### #
 
 # check that initial and final points are different [OTHERWISE DMP MIGHT FAIL]
 for i in range(len(y_teach[0,:])):
     if y_teach[0,i] == y_teach[-1,i]: y_teach[-1,i] += 0.05 # [mm]
 
-absc_teach = np.array([0]) # curvilinea abscissa of the teached path
+# curvilinea abscissa of the teached path
+absc_teach = np.array([0]) 
 for i in range(len(y_teach[:,0])-1):
-    
-    absc_teach = np.append(absc_teach,absc_teach[-1] + np.sqrt(
+        absc_teach = np.append(absc_teach,absc_teach[-1] + np.sqrt(
         (y_teach[i+1,0]-y_teach[i,0])**2 + (y_teach[i+1,1]-y_teach[i,1])**2))
     
     # check that 2 consecutive abscissa evaluations are not equal:
-    # this don't allow to properly use the interpolation tool
-    if absc_teach[-1] == absc_teach[-2]: absc_teach[-1] += 1e-5
+    # (if that appens, it doesn't allow to properly use the interpolation tool)
+    if absc_teach[-1] == absc_teach[-2]:    absc_teach[-1] += 1e-5
     
-# notice that the final point of the curvilinea abscissa is also the path length
+# the final point of the curvilinea abscissa is also the path length
 len_teach = absc_teach[-1]
 print("\n The teached path length is: ",np.round(len_teach,2)," mm") 
 
-pt_density = 4/nozzle_dia # [pts/mm] - initial refitting density (4 pts per diameter)
+pt_density = 4/nozzle_dia # [pts/mm] - initial refitting density (selected 4 pts per diameter)
 ds = nozzle_dia/4         # [mm/pts] - spatial-step of the v_ref points
 
 n_new = int(round(len_teach*pt_density)) # total number of points wished after refitting
 
-# we want to refit the points in order to ensure that they are EQUALLY spaced 
-# along the curvilinea abscissa (x1 = cartesian X, x2 = cartesian Y)
+# points are refitted to ensure EQUALLY spacing along the curvilinea abscissa 
+# (x1 = cartesian X, x2 = cartesian Y)
 
-# EQUAL SPACING ALONG ABSCISSA, no time
-x1 = np.interp(np.linspace(0,len_teach,n_new),absc_teach,y_teach[:,0])
-x2 = np.interp(np.linspace(0,len_teach,n_new),absc_teach,y_teach[:,1])
+# EQUAL SPACING ALONG ABSCISSA, no time characterization
+x1 = np.interp(np.linspace(0,len_teach,n_new) , absc_teach,y_teach[:,0])
+x2 = np.interp(np.linspace(0,len_teach,n_new) , absc_teach,y_teach[:,1])
 
 y_eq_space = np.column_stack((x1,x2))
 
@@ -120,9 +126,9 @@ for i in range(len(rect_steer)):
     else:
         mean_steer[i] = np.mean(rect_steer[i-hw:i+hw+1])
 
-# #########################################
-# FUZZY LOGIC + PATH REFERENCE GENERATION #
-###########################################
+# ########################################## #
+# 3. FUZZY LOGIC + PATH REFERENCE GENERATION #
+# ########################################## #
 
 t_ref = v_ref = acc_ref = np.array([0])
 
@@ -131,7 +137,7 @@ for i in range(1,len(mean_steer)):
     # INPUT
     in_dict = dict({'Steering':mean_steer[i]}) # mean steering value
     
-    # FUZZY SYSTEM
+    # FUZZY SYSTEM SET UP : defintion of the shape functions
     steering = FuzzyInputVariable('Steering',0,0.50,400)
     steering.add_trapezoidal('Very small curve',0.21,0.35,0.5,0.5)
     steering.add_trapezoidal('Small curve',0.1,0.18,0.24,0.45)
@@ -159,37 +165,38 @@ for i in range(1,len(mean_steer)):
 
     # OUTPUT EVALUATION
     out_dict = system.evaluate_output(in_dict)
-    v_out = np.array(list(out_dict.values()))
+    v_out = np.array(list(out_dict.values())) # - Fuzzy Output Velocity Vector
     
-    # we force the last point to have null reference velocity
+    # force the last point to have null reference velocity
     if i == len(mean_steer)-1:
         v_out = 0 # np.array([0])
     
-    # evaluation of the instantaneous acceleration
-    t_inst = 2 * ds / abs(v_ref[-1] + v_out) # 2 is for the mean at the denominator
+    # evaluation of the instantaneous acceleration: dt = ds/dv
+    t_inst = 2 * ds / abs(v_ref[-1] + v_out) 
     acc_inst = (v_out - v_ref[-1]) / t_inst
-
-    if abs(acc_inst) > acc_lim: # we are not able to perform sudden changes in velocity
+    
+    # acceleration check
+    if abs(acc_inst) > acc_lim: 
         
-        if acc_inst > 0: # we can't accelerate so fast
-            while acc_inst > acc_lim:
-                v_out -= 0.1                              # we can speed up the 
-                t_inst = 2 * ds / abs(v_ref[-1] + v_out)  # code decreasing the
-                acc_inst = (v_out - v_ref[-1]) / t_inst   # reduction step
+        if acc_inst > 0: # acceleration
+            while acc_inst > acc_lim:       # convergence procedure on acceleration limit
+                v_out -= 0.1 # reduction step                    
+                t_inst = 2 * ds / abs(v_ref[-1] + v_out)  
+                acc_inst = (v_out - v_ref[-1]) / t_inst   
             
             v_ref = np.append(v_ref,v_out)
             t_ref = np.append(t_ref,t_ref[-1] + t_inst)
             acc_ref = np.append(acc_ref,acc_inst)
             
-        else: # we can't decelerate so fast
+        else: # deceleration
             
-            # firstly the last velocity is fixed (we impose the lowest one)
-            # then we decrease accordingly the previous velocities
+            # the last velocity is fixed (maximum velocity admitted by fuzzy logic)
+            # previous velocities are decreased to match the decelleration limit
             v_ref = np.append(v_ref,v_out)
             t_ref = np.append(t_ref,t_ref[-1] + t_inst)
             acc_ref = np.append(acc_ref,acc_inst)
             
-            back = 0 # both counter and exit of the while cycle
+            back = 0 # counter and exit value of the while cycle
             
             while back >= 0:
                 
@@ -201,11 +208,10 @@ for i in range(1,len(mean_steer)):
                     t_inst = 2 * ds / abs(v_ref[-2-back] + v_ref[-1-back])
                     acc_inst = (v_ref[-1-back] - v_ref[-2-back]) / t_inst
                 
-                # now we have to consider that changing the 2nd last velocity value,
-                # the lasts 2 time instants will be different (longer), so we have
-                # to update their values. [t_inst is the new dt of last step]
+                # changing the 2nd last point velocity and t_inst value,
+                # update their values [t_inst is the new dt of last step]
                     
-                t_back = 2 * ds / abs(v_ref[-3-back] + v_ref[2-back]) # new dt of 2nd last step
+                t_back = 2 * ds / abs(v_ref[-3-back] + v_ref[2-back]) # new t_inst of 2nd last step
                 
                 # time shift due to change in velocity, of the previous time step
                 shift_back = t_back - (t_ref[-2-back] - t_ref[-3-back])
@@ -220,35 +226,38 @@ for i in range(1,len(mean_steer)):
                 acc_ref[-1-back] = acc_inst
                 acc_ref[-2-back] = (v_ref[-2-back]-v_ref[-3-back]) / t_back
                 
-                # check that the acc at preeStamped' object has no attribute 'position'vious time instant meets the limits 
+                # check that the acc at previous time instant meets the limits 
                 if abs(acc_ref[-2-back]) < acc_lim:
                     back = -1
                 else:
                     back += 1
 
     else:
-        v_ref = np.append(v_ref,v_out)
+        v_ref = np.append(v_ref,v_out) # velocity vector function of space
         t_ref = np.append(t_ref,t_ref[-1] + t_inst) 
         acc_ref = np.append(acc_ref,acc_inst)
 
     if i <= len(mean_steer)-2:
         del system
 
-# we want to create the desired curvilinea abscissa to be given to the DMP
-t_tot = t_ref[-1]               # total runtime of the path execution (DMP)
+t_tot = t_ref[-1]                   # total runtime of the path execution (DMP)
 n_points = int(round(t_tot/dt)) + 1 
 
+# ########################################## #
+# 4. TRAJECTORY REFERENCE GENERATION         #
+# ########################################## #
+
 # fitting of velocity values with respect to time
-f_des = interpolate.interp1d(t_ref,v_ref,kind="linear") # THAT'S A FUNCTION
+f_des = interpolate.interp1d(t_ref,v_ref,kind="linear") 
 t_fuzzy = np.linspace(0,t_tot,n_points)
-v_des = f_des(t_fuzzy)
+v_des = f_des(t_fuzzy) 
 
-# add some points to the beginning and the end (useful for DMP framework)
+# add some null points to the beginning and the end (useful for DMP framework)
 points = np.zeros(int(round(t_start / dt)))
-v_des = np.append(points,np.append(v_des,points))
+v_des = np.append(points,np.append(v_des,points)) # velocity vector function of time
 
 
-# new curvilinea abscissa (with velocity reference embeddded)
+# new curvilinea abscissa (with velocity reference embedded)
 absc_des = np.cumsum(v_des) * dt
 
 # define the x and y desired points to be fed into the DMP
