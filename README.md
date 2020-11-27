@@ -9,7 +9,7 @@ The proposed work is based on the attached master thesis (PDF), which uses a phy
 
 To run the simulation:
   
-  1 - Load the code on the Arduino board and fix in the code the Serial communication (baud: 115200, COM port depends on the workstation used)
+  1 - Load the code on the Arduino board and fix in the code the Serial communication (baud: 115200, COM port depends on the workstation)
   
   2 - Place the robot in the same position of the offset (this avoid an initial discontinuity, since the robot trajectory starts in the origin)
 
